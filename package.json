@@ -1,0 +1,13 @@
+{
+  "name": "opencode-responses-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --experimental-strip-types src/server.ts",
+    "test": "node --experimental-strip-types --test --test-reporter=spec test/gateway.test.ts"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}

@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: codex-cli-test-config
+  namespace: opencode-responses-gateway
+data:
+  config.toml: |
+    model = "mimo-v2.5-free"
+    model_provider = "opencode_gateway"
+    approval_policy = "never"
+    sandbox_mode = "danger-full-access"
+    web_search = "disabled"
+    check_for_update_on_startup = false
+
+    [model_providers.opencode_gateway]
+    name = "Isolated OpenCode Responses Gateway"
+    base_url = "http://gateway:8080/v1"
+    env_key = "OPENAI_API_KEY"
+    wire_api = "responses"
+    request_max_retries = 0
+    stream_max_retries = 0
+    stream_idle_timeout_ms = 120000
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: codex-cli-real-test
+  namespace: opencode-responses-gateway
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: { access: gateway }
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      initContainers:
+        - name: install-codex
+          image: node:24-bookworm-slim
+          command: ["npm", "install", "--prefix", "/opt/codex", "@openai/codex@latest"]
+          volumeMounts: [{ name: codex-install, mountPath: /opt/codex }]
+      containers:
+        - name: codex-cli
+          image: node:24-bookworm-slim
+          env:
+            - { name: CODEX_HOME, value: /isolated-codex-home }
+            - { name: OPENAI_API_KEY, value: isolated-dummy-key }
+            - { name: PATH, value: /opt/codex/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin }
+          workingDir: /workspace
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              codex --version
+              printf 'alpha\nbeta\n' > input.txt
+              set +e
+              codex exec --skip-git-repo-check --json 'Read input.txt. Use the shell tool to create result.txt containing exactly ALPHA-BETA followed by a newline. Then use the shell tool again to read result.txt. Only after both tool steps succeed, answer exactly MULTISTEP-OK.' > codex-events.jsonl 2> codex-stderr.log
+              codex_status=$?
+              set -e
+              echo "codex_exit=$codex_status"
+              if [ -s codex-stderr.log ]; then sed -n '1,100p' codex-stderr.log; fi
+              if [ "$codex_status" -ne 0 ]; then tail -40 codex-events.jsonl; exit "$codex_status"; fi
+              test "$(cat result.txt)" = "ALPHA-BETA"
+              grep -q 'MULTISTEP-OK' codex-events.jsonl
+              echo '{"realCodexCli":"passed","multiStepTools":true,"workspaceIsolated":true}'
+          volumeMounts:
+            - { name: codex-install, mountPath: /opt/codex, readOnly: true }
+            - { name: codex-home, mountPath: /isolated-codex-home }
+            - { name: config, mountPath: /isolated-codex-home/config.toml, subPath: config.toml, readOnly: true }
+            - { name: workspace, mountPath: /workspace }
+      volumes:
+        - { name: codex-install, emptyDir: {} }
+        - { name: codex-home, emptyDir: {} }
+        - { name: workspace, emptyDir: {} }
+        - { name: config, configMap: { name: codex-cli-test-config } }
