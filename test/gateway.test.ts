@@ -214,3 +214,65 @@ test("streaming custom tool call uses native Responses events", async () => {
   assert.doesNotMatch(text, /response\.function_call_arguments\.delta/);
   assert.match(text, /response\.completed/);
 });
+
+test("native Responses mode passes multimodal requests and SSE through unchanged", async () => {
+  let received: any;
+  const receivedPaths: string[] = [];
+  const nativeUpstream = createServer(async (req, res) => {
+    receivedPaths.push(`${req.method} ${req.url}`);
+    if (req.method === "GET") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ id: "resp_123", object: "response" }));
+      return;
+    }
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    received = JSON.parse(raw);
+    res.writeHead(200, { "content-type": "text/event-stream", "x-request-id": "req_native" });
+    res.end("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_native\"}}\n\n");
+  });
+  await new Promise<void>((resolve) => nativeUpstream.listen(0, "127.0.0.1", resolve));
+  const nativeGateway = createServer(createHandler({
+    upstreamUrl: `http://127.0.0.1:${(nativeUpstream.address() as any).port}/v1/responses`,
+    upstreamWireApi: "responses",
+    upstreamApiKey: "secret",
+    configuredModel: "gpt-5.6-luna",
+    requestTimeoutMs: 5000,
+  }));
+  await new Promise<void>((resolve) => nativeGateway.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${(nativeGateway.address() as any).port}`;
+  try {
+    const request = {
+      model: "gpt-5.6-luna",
+      stream: true,
+      input: [{ role: "user", content: [
+        { type: "input_text", text: "describe" },
+        { type: "input_image", image_url: "data:image/png;base64,AA==" },
+      ] }],
+      tools: [{ type: "web_search" }],
+    };
+    const response = await fetch(`${url}/v1/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("x-request-id"), "req_native");
+    assert.match(await response.text(), /resp_native/);
+    assert.deepEqual(received, request);
+
+    const stored: any = await (await fetch(`${url}/v1/responses/resp_123`)).json();
+    assert.equal(stored.id, "resp_123");
+    assert.deepEqual(receivedPaths, ["POST /v1/responses", "GET /v1/responses/resp_123"]);
+
+    const models: any = await (await fetch(`${url}/v1/models`)).json();
+    assert.equal(models.data[0].id, "gpt-5.6-luna");
+  } finally {
+    nativeGateway.closeAllConnections();
+    nativeUpstream.closeAllConnections();
+    await Promise.all([
+      new Promise<void>((resolve) => nativeGateway.close(() => resolve())),
+      new Promise<void>((resolve) => nativeUpstream.close(() => resolve())),
+    ]);
+  }
+});

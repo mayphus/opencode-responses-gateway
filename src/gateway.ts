@@ -6,16 +6,20 @@ type RecordJson = Record<string, any>;
 
 export interface GatewayConfig {
   upstreamUrl: string;
+  upstreamWireApi?: "chat_completions" | "responses";
   upstreamApiKey?: string;
   gatewayApiKey?: string;
+  configuredModel?: string;
   requestTimeoutMs: number;
 }
 
 export function loadConfig(env = process.env): GatewayConfig {
   return {
-    upstreamUrl: env.OPENCODE_CHAT_COMPLETIONS_URL ?? "https://opencode.ai/zen/v1/chat/completions",
+    upstreamUrl: env.OPENCODE_UPSTREAM_URL ?? env.OPENCODE_CHAT_COMPLETIONS_URL ?? "https://opencode.ai/zen/v1/chat/completions",
+    upstreamWireApi: env.OPENCODE_UPSTREAM_WIRE_API === "responses" ? "responses" : "chat_completions",
     upstreamApiKey: env.OPENCODE_API_KEY,
     gatewayApiKey: env.GATEWAY_API_KEY,
+    configuredModel: env.OPENCODE_MODEL,
     requestTimeoutMs: Number(env.REQUEST_TIMEOUT_MS ?? 300_000),
   };
 }
@@ -275,6 +279,18 @@ async function readBody(req: IncomingMessage): Promise<RecordJson> {
   try { return JSON.parse(raw || "{}"); } catch { throw new Error("Request body is not valid JSON"); }
 }
 
+async function readRawBody(req: IncomingMessage): Promise<Uint8Array | undefined> {
+  const chunks: Buffer[] = [];
+  let length = 0;
+  for await (const chunk of req) {
+    const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    length += value.length;
+    if (length > 16 * 1024 * 1024) throw new Error("Request body is too large");
+    chunks.push(value);
+  }
+  return chunks.length ? Buffer.concat(chunks) : undefined;
+}
+
 function sse(res: ServerResponse, event: RecordJson): void {
   res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
 }
@@ -413,12 +429,68 @@ async function proxyStream(upstream: Response, res: ServerResponse, body: Record
 
 export function createHandler(config: GatewayConfig) {
   return async (req: IncomingMessage, res: ServerResponse) => {
-    if (req.method === "GET" && req.url === "/healthz") return json(res, 200, { status: "ok" });
-    if (req.method !== "POST" || !["/v1/responses", "/responses"].includes(req.url ?? "")) return apiError(res, 404, "Not found", "not_found_error");
+    const requestUrl = new URL(req.url ?? "/", "http://gateway.local");
+    if (req.method === "GET" && requestUrl.pathname === "/healthz") {
+      return json(res, 200, { status: "ok", wire_api: config.upstreamWireApi ?? "chat_completions", model: config.configuredModel ?? null });
+    }
     if (config.gatewayApiKey) {
       const presented = String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
       if (!presented || !safeEqual(presented, config.gatewayApiKey)) return apiError(res, 401, "Invalid gateway API key", "authentication_error");
     }
+    if (req.method === "GET" && requestUrl.pathname === "/v1/models") {
+      const data = config.configuredModel
+        ? [{ id: config.configuredModel, object: "model", created: 0, owned_by: "opencode" }]
+        : [];
+      return json(res, 200, { object: "list", data });
+    }
+    const responsePath = requestUrl.pathname === "/responses"
+      ? ""
+      : requestUrl.pathname.startsWith("/v1/responses")
+        ? requestUrl.pathname.slice("/v1/responses".length)
+        : undefined;
+    if (config.upstreamWireApi === "responses" && responsePath !== undefined && ["GET", "POST", "DELETE"].includes(req.method ?? "")) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), config.requestTimeoutMs);
+      try {
+        const upstreamUrl = new URL(config.upstreamUrl);
+        upstreamUrl.pathname = upstreamUrl.pathname.replace(/\/$/, "") + responsePath;
+        upstreamUrl.search = requestUrl.search;
+        const headers: Record<string, string> = {};
+        for (const name of ["accept", "content-type", "idempotency-key", "openai-beta"]) {
+          const value = req.headers[name];
+          if (typeof value === "string") headers[name] = value;
+        }
+        if (config.upstreamApiKey) headers.authorization = `Bearer ${config.upstreamApiKey}`;
+        const rawBody = ["GET", "DELETE"].includes(req.method ?? "") ? undefined : await readRawBody(req);
+        const upstream = await fetch(upstreamUrl, {
+          method: req.method,
+          headers,
+          body: rawBody,
+          signal: controller.signal,
+        });
+        const responseHeaders: Record<string, string> = {};
+        for (const name of ["content-type", "cache-control", "x-request-id", "openai-processing-ms"]) {
+          const value = upstream.headers.get(name);
+          if (value) responseHeaders[name] = value;
+        }
+        res.writeHead(upstream.status, responseHeaders);
+        if (!upstream.body) return res.end();
+        const reader = upstream.body.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(value);
+        }
+        return res.end();
+      } catch (error) {
+        if (!res.headersSent) return apiError(res, 502, error instanceof Error ? error.message : "Upstream request failed", "upstream_error");
+        res.destroy(error instanceof Error ? error : undefined);
+        return;
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+    if (req.method !== "POST" || !["/v1/responses", "/responses"].includes(requestUrl.pathname)) return apiError(res, 404, "Not found", "not_found_error");
     let body: RecordJson;
     let chat: RecordJson;
     try { body = await readBody(req); chat = toChatRequest(body); }

@@ -1,0 +1,21 @@
+# Render this template for a public, immutable release URL, then run:
+# winget validate --manifest <rendered-file>
+PackageIdentifier: Mayphus.OpenCodeResponsesGateway
+PackageVersion: __VERSION__
+PackageLocale: en-US
+Publisher: Mayphus
+PackageName: OpenCode Responses Gateway
+License: Proprietary
+ShortDescription: Local OpenAI Responses compatibility gateway for OpenCode models
+Moniker: opencode-gateway
+InstallerType: zip
+Installers:
+  - Architecture: x64
+    InstallerUrl: __INSTALLER_URL__
+    InstallerSha256: __INSTALLER_SHA256__
+    NestedInstallerType: portable
+    NestedInstallerFiles:
+      - RelativeFilePath: opencode-gateway.exe
+        PortableCommandAlias: opencode-gateway
+ManifestType: singleton
+ManifestVersion: 1.12.0
