@@ -12,11 +12,17 @@ let lastRequest: any;
 before(async () => {
   upstream = createServer(async (req, res) => {
     let raw = ""; for await (const c of req) raw += c; lastRequest = JSON.parse(raw);
+    const requestedTool = lastRequest.tools?.[0]?.function?.name;
+    const hasToolOutput = lastRequest.messages.some((m: any) => m.role === "tool");
     if (lastRequest.stream) {
       res.writeHead(200, { "content-type": "text/event-stream" });
-      if (lastRequest.tools && !lastRequest.messages.some((m: any) => m.role === "tool")) {
-        res.write('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_weather","type":"function","function":{"name":"weather","arguments":"{\\"city\\":"}}]}}]}\n\n');
-        res.write('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"Boston\\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14}}\n\n');
+      if (requestedTool && !hasToolOutput) {
+        if (requestedTool === "apply_patch") {
+          res.write(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: "call_patch", type: "function", function: { name: "apply_patch", arguments: JSON.stringify({ input: "*** Begin Patch\n*** End Patch" }) } }] }, finish_reason: "tool_calls" }], usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 } })}\n\n`);
+        } else {
+          res.write('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_weather","type":"function","function":{"name":"weather","arguments":"{\\"city\\":"}}]}}]}\n\n');
+          res.write('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"Boston\\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14}}\n\n');
+        }
       } else {
         res.write('data: {"choices":[{"delta":{"role":"assistant","content":"hello "}}]}\n\n');
         res.write('data: {"choices":[{"delta":{"content":"world"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}\n\n');
@@ -24,8 +30,11 @@ before(async () => {
       res.end('data: [DONE]\n\n'); return;
     }
     res.writeHead(200, { "content-type": "application/json" });
-    if (lastRequest.tools && !lastRequest.messages.some((m: any) => m.role === "tool")) {
-      res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "call_weather", type: "function", function: { name: "weather", arguments: "{\"city\":\"Boston\"}" } }] }, finish_reason: "tool_calls" }], usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 } }));
+    if (requestedTool && !hasToolOutput) {
+      const call = requestedTool === "apply_patch"
+        ? { id: "call_patch", type: "function", function: { name: "apply_patch", arguments: JSON.stringify({ input: "*** Begin Patch\n*** End Patch" }) } }
+        : { id: "call_weather", type: "function", function: { name: "weather", arguments: "{\"city\":\"Boston\"}" } };
+      res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: null, tool_calls: [call] }, finish_reason: "tool_calls" }], usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 } }));
     } else res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "hello world" }, finish_reason: "stop" }], usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 } }));
   });
   await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
@@ -66,6 +75,26 @@ test("preserves opaque reasoning state for multi-step tool calls", () => {
   assert.equal(chat.messages[0].tool_calls[0].id, "call_1");
 });
 
+test("translates free-form custom tools and their history through Chat functions", () => {
+  const chat = toChatRequest({ model: "test", input: [
+    { type: "message", role: "user", content: "edit it" },
+    { type: "custom_tool_call", call_id: "call_patch", name: "apply_patch", input: "*** Begin Patch\n*** End Patch" },
+    { type: "custom_tool_call_output", call_id: "call_patch", output: "Done!" },
+  ], tools: [{ type: "custom", name: "apply_patch", description: "Apply a patch", format: { type: "grammar", syntax: "lark", definition: "..." } }], tool_choice: { type: "custom", name: "apply_patch" } });
+  assert.deepEqual(chat.messages.map((m: any) => m.role), ["user", "assistant", "tool"]);
+  assert.deepEqual(JSON.parse(chat.messages[1].tool_calls[0].function.arguments), { input: "*** Begin Patch\n*** End Patch" });
+  assert.equal(chat.tools[0].function.name, "apply_patch");
+  assert.deepEqual(chat.tools[0].function.parameters.required, ["input"]);
+  assert.equal(chat.tool_choice.function.name, "apply_patch");
+});
+
+test("omits Chat tool controls when no client-executable tools remain", () => {
+  const chat = toChatRequest({ model: "test", input: "hi", tools: [{ type: "web_search" }], tool_choice: "auto", parallel_tool_calls: true });
+  assert.equal(chat.tools, undefined);
+  assert.equal(chat.tool_choice, undefined);
+  assert.equal(chat.parallel_tool_calls, undefined);
+});
+
 test("rejects images instead of silently dropping them", () => {
   assert.throws(() => toChatRequest({ model: "test", input: [{
     type: "message", role: "user", content: [
@@ -101,4 +130,26 @@ test("streaming tool call response", async () => {
   const response = await fetch(`${gatewayUrl}/v1/responses`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "test", input: "weather?", stream: true, tools: [{ type: "function", name: "weather", parameters: { type: "object" } }] }) });
   const text = await response.text();
   assert.match(text, /response\.function_call_arguments\.delta/); assert.match(text, /call_weather/); assert.match(text, /Boston/); assert.match(text, /response\.completed/);
+});
+
+test("custom tool-call round trip", async () => {
+  const tools = [{ type: "custom", name: "apply_patch", description: "Apply a patch", format: { type: "grammar", syntax: "lark", definition: "..." } }];
+  const first: any = await (await fetch(`${gatewayUrl}/v1/responses`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "test", input: "edit it", tools }) })).json();
+  assert.equal(first.output[0].type, "custom_tool_call");
+  assert.equal(first.output[0].call_id, "call_patch");
+  assert.equal(first.output[0].input, "*** Begin Patch\n*** End Patch");
+  const second: any = await (await fetch(`${gatewayUrl}/v1/responses`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "test", input: [{ type: "message", role: "user", content: "edit it" }, first.output[0], { type: "custom_tool_call_output", call_id: first.output[0].call_id, output: "Done!" }], tools }) })).json();
+  assert.equal(second.output[0].content[0].text, "hello world");
+  assert.deepEqual(lastRequest.messages.map((m: any) => m.role), ["user", "assistant", "tool"]);
+});
+
+test("streaming custom tool call uses native Responses events", async () => {
+  const response = await fetch(`${gatewayUrl}/v1/responses`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "test", input: "edit it", stream: true, tools: [{ type: "custom", name: "apply_patch", description: "Apply a patch" }] }) });
+  const text = await response.text();
+  assert.match(text, /"type":"custom_tool_call"/);
+  assert.match(text, /response\.custom_tool_call_input\.delta/);
+  assert.match(text, /response\.custom_tool_call_input\.done/);
+  assert.match(text, /\*\*\* Begin Patch/);
+  assert.doesNotMatch(text, /response\.function_call_arguments\.delta/);
+  assert.match(text, /response\.completed/);
 });

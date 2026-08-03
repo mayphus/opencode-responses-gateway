@@ -34,20 +34,35 @@ spec:
                 return json;
               };
               const text = await call({ model: 'deepseek-v4-flash-free', input: 'Reply with exactly: gateway-ok', max_output_tokens: 96 });
-              const outputText = text?.output?.[0]?.content?.[0]?.text;
+              const outputText = text?.output?.find((item) => item.type === 'message')?.content?.[0]?.text;
               if (typeof outputText !== 'string' || outputText.length === 0) throw new Error('non-stream text missing');
               const streamResponse = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'deepseek-v4-flash-free', input: 'Reply with exactly: stream-ok', max_output_tokens: 96, stream: true }) });
               const events = await streamResponse.text();
               for (const expected of ['response.created', 'response.output_text.delta', 'response.completed']) if (!events.includes(expected)) throw new Error(`stream event missing: ${expected}`);
               const tools = [{ type: 'function', name: 'weather', description: 'Get weather', parameters: { type: 'object', properties: { city: { type: 'string' } }, required: ['city'] } }];
-              const first = await call({ model: 'mimo-v2.5-free', input: 'Use the weather tool for Boston.', tools, tool_choice: { type: 'function', name: 'weather' }, max_output_tokens: 512 });
+              const first = await call({ model: 'deepseek-v4-flash-free', input: 'Use the weather tool for Boston. You must call weather rather than answer directly.', tools, tool_choice: 'auto', max_output_tokens: 512 });
               const functionCall = first.output?.find((item) => item.type === 'function_call');
               if (!functionCall?.call_id || functionCall.name !== 'weather') throw new Error('function call missing');
-              const second = await call({ model: 'mimo-v2.5-free', input: [
-                { type: 'message', role: 'user', content: 'Use the weather tool for Boston.' },
-                functionCall,
+              const second = await call({ model: 'deepseek-v4-flash-free', input: [
+                { type: 'message', role: 'user', content: 'Use the weather tool for Boston. You must call weather rather than answer directly.' },
+                ...first.output,
                 { type: 'function_call_output', call_id: functionCall.call_id, output: '{"temperature":"20 C","conditions":"sunny"}' },
               ], tools, tool_choice: 'none', max_output_tokens: 512 });
-              const finalText = second.output?.[0]?.content?.[0]?.text;
+              const finalText = second.output?.find((item) => item.type === 'message')?.content?.[0]?.text;
               if (typeof finalText !== 'string' || finalText.length === 0) throw new Error('tool round-trip final text missing');
-              console.log(JSON.stringify({ gatewayE2E: 'passed', servicePath: true, nonStream: true, streaming: true, toolRoundTrip: true, outputCharacters: { text: outputText.length, final: finalText.length } }));
+              const customTools = [{ type: 'custom', name: 'apply_patch', description: 'Apply a patch using the complete raw patch envelope.' }];
+              const customStreamResponse = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'deepseek-v4-flash-free', input: 'Call apply_patch with this exact input and do not answer directly: *** Begin Patch\n*** End Patch', tools: customTools, tool_choice: 'auto', max_output_tokens: 512, stream: true }) });
+              const customEvents = await customStreamResponse.text();
+              if (!customStreamResponse.ok) throw new Error(`custom stream HTTP ${customStreamResponse.status}: ${customEvents.slice(0, 500)}`);
+              for (const expected of ['custom_tool_call', 'response.custom_tool_call_input.delta', 'response.custom_tool_call_input.done', 'response.completed']) if (!customEvents.includes(expected)) throw new Error(`custom stream event missing: ${expected}`);
+              const customFirst = await call({ model: 'deepseek-v4-flash-free', input: 'Call apply_patch with this exact input and do not answer directly: *** Begin Patch\n*** End Patch', tools: customTools, tool_choice: 'auto', max_output_tokens: 512 });
+              const customCall = customFirst.output?.find((item) => item.type === 'custom_tool_call');
+              if (!customCall?.call_id || customCall.name !== 'apply_patch' || !customCall.input.includes('*** Begin Patch')) throw new Error('custom tool call missing');
+              const customSecond = await call({ model: 'deepseek-v4-flash-free', input: [
+                { type: 'message', role: 'user', content: 'Call apply_patch with this exact input and do not answer directly: *** Begin Patch\n*** End Patch' },
+                ...customFirst.output,
+                { type: 'custom_tool_call_output', call_id: customCall.call_id, output: 'Done!' },
+              ], tools: customTools, tool_choice: 'none', max_output_tokens: 512 });
+              const customFinalText = customSecond.output?.find((item) => item.type === 'message')?.content?.[0]?.text;
+              if (typeof customFinalText !== 'string' || customFinalText.length === 0) throw new Error('custom tool round-trip final text missing');
+              console.log(JSON.stringify({ gatewayE2E: 'passed', servicePath: true, nonStream: true, streaming: true, toolRoundTrip: true, customToolStreaming: true, customToolRoundTrip: true, outputCharacters: { text: outputText.length, final: finalText.length, customFinal: customFinalText.length } }));

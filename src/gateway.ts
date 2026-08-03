@@ -58,6 +58,33 @@ function decodeReasoning(content: unknown): string | undefined {
   catch { return undefined; }
 }
 
+function customToolNames(body: RecordJson): Set<string> {
+  return new Set((Array.isArray(body.tools) ? body.tools : [])
+    .filter((tool: RecordJson) => tool?.type === "custom" && typeof tool.name === "string")
+    .map((tool: RecordJson) => tool.name));
+}
+
+function customToolInput(argumentsJson: unknown): string {
+  if (typeof argumentsJson !== "string") return "";
+  try {
+    const parsed = JSON.parse(argumentsJson);
+    if (typeof parsed === "string") return parsed;
+    if (parsed && typeof parsed === "object" && typeof parsed.input === "string") return parsed.input;
+  } catch { /* Some compatible providers return the free-form input directly. */ }
+  return argumentsJson;
+}
+
+function customToolParameters(): RecordJson {
+  return {
+    type: "object",
+    properties: {
+      input: { type: "string", description: "The complete raw input for this free-form tool." },
+    },
+    required: ["input"],
+    additionalProperties: false,
+  };
+}
+
 export function toChatRequest(body: RecordJson): RecordJson {
   if (!body || typeof body !== "object") throw new Error("Request body must be a JSON object");
   if (body.previous_response_id) throw new Error("previous_response_id is not supported; send full conversation input");
@@ -91,18 +118,23 @@ export function toChatRequest(body: RecordJson): RecordJson {
       }
       continue;
     }
-    if (item.type === "function_call") {
+    if (item.type === "function_call" || item.type === "custom_tool_call") {
       if (!pendingAssistant) pendingAssistant = { role: "assistant", content: null };
       if (!pendingAssistant.tool_calls) pendingAssistant.tool_calls = [];
       pendingAssistant.tool_calls.push({
         id: item.call_id ?? item.id,
         type: "function",
-        function: { name: item.name, arguments: typeof item.arguments === "string" ? item.arguments : JSON.stringify(item.arguments ?? {}) },
+        function: {
+          name: item.name,
+          arguments: item.type === "custom_tool_call"
+            ? JSON.stringify({ input: typeof item.input === "string" ? item.input : "" })
+            : typeof item.arguments === "string" ? item.arguments : JSON.stringify(item.arguments ?? {}),
+        },
       });
       continue;
     }
     flushAssistant();
-    if (item.type === "function_call_output") {
+    if (item.type === "function_call_output" || item.type === "custom_tool_call_output") {
       messages.push({ role: "tool", tool_call_id: item.call_id, content: textFromContent(item.output) || String(item.output ?? "") });
     } else if (item.type === "message" || item.role) {
       const role = item.role === "developer" ? "system" : item.role;
@@ -113,22 +145,37 @@ export function toChatRequest(body: RecordJson): RecordJson {
 
   const request: RecordJson = { model: body.model, messages, stream: Boolean(body.stream) };
   if (body.max_output_tokens != null) request.max_tokens = body.max_output_tokens;
-  for (const field of ["temperature", "top_p", "parallel_tool_calls", "seed"]) {
+  for (const field of ["temperature", "top_p", "seed"]) {
     if (body[field] != null) request[field] = body[field];
   }
   if (Array.isArray(body.tools)) {
-    request.tools = body.tools.filter((t: RecordJson) => t?.type === "function").map((tool: RecordJson) => ({
-      type: "function",
-      function: {
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.parameters ?? { type: "object", properties: {} },
-        ...(tool.strict == null ? {} : { strict: tool.strict }),
-      },
-    }));
+    const tools = body.tools.flatMap((tool: RecordJson) => {
+      if (tool?.type === "function") return [{
+        type: "function",
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters ?? { type: "object", properties: {} },
+          ...(tool.strict == null ? {} : { strict: tool.strict }),
+        },
+      }];
+      if (tool?.type === "custom" && typeof tool.name === "string") return [{
+        type: "function",
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: customToolParameters(),
+        },
+      }];
+      return [];
+    });
+    if (tools.length) {
+      request.tools = tools;
+      if (body.parallel_tool_calls != null) request.parallel_tool_calls = body.parallel_tool_calls;
+    }
   }
-  if (body.tool_choice != null) {
-    request.tool_choice = body.tool_choice?.type === "function" && body.tool_choice.name
+  if (body.tool_choice != null && request.tools) {
+    request.tool_choice = ["function", "custom"].includes(body.tool_choice?.type) && body.tool_choice.name
       ? { type: "function", function: { name: body.tool_choice.name } }
       : body.tool_choice;
   }
@@ -154,9 +201,10 @@ function baseResponse(id: string, createdAt: number, body: RecordJson, status: s
   };
 }
 
-function outputFromChoice(choice: RecordJson): RecordJson[] {
+function outputFromChoice(choice: RecordJson, body: RecordJson): RecordJson[] {
   const message = choice?.message ?? {};
   const output: RecordJson[] = [];
+  const customNames = customToolNames(body);
   if (typeof message.reasoning_content === "string" && message.reasoning_content) {
     output.push({
       id: `rs_${randomUUID().replaceAll("-", "")}`,
@@ -164,11 +212,19 @@ function outputFromChoice(choice: RecordJson): RecordJson[] {
     });
   }
   if (Array.isArray(message.tool_calls) && message.tool_calls.length) {
-    output.push(...message.tool_calls.map((call: RecordJson) => ({
-      id: `fc_${randomUUID().replaceAll("-", "")}`,
-      type: "function_call", status: "completed", call_id: call.id,
-      name: call.function?.name ?? "", arguments: call.function?.arguments ?? "{}",
-    })));
+    output.push(...message.tool_calls.map((call: RecordJson) => {
+      const name = call.function?.name ?? "";
+      if (customNames.has(name)) return {
+        id: `ctc_${randomUUID().replaceAll("-", "")}`,
+        type: "custom_tool_call", status: "completed", call_id: call.id,
+        name, input: customToolInput(call.function?.arguments),
+      };
+      return {
+        id: `fc_${randomUUID().replaceAll("-", "")}`,
+        type: "function_call", status: "completed", call_id: call.id,
+        name, arguments: call.function?.arguments ?? "{}",
+      };
+    }));
   }
   const text = textFromContent(message.content);
   if (text || output.length === 0) {
@@ -237,7 +293,8 @@ async function proxyStream(upstream: Response, res: ServerResponse, body: Record
   let reasoningOutputIndex = -1;
   let reasoningContent = "";
   let usage: RecordJson | null = null;
-  const calls = new Map<number, { id: string; itemId: string; name: string; arguments: string; outputIndex: number }>();
+  const customNames = customToolNames(body);
+  const calls = new Map<number, { id: string; itemId: string; name: string; arguments: string; outputIndex: number; started: boolean; emittedArguments: number }>();
   let nextOutput = 0;
   const ensureMessage = () => {
     if (messageId) return;
@@ -266,14 +323,26 @@ async function proxyStream(upstream: Response, res: ServerResponse, body: Record
       const index = Number(rawCall.index ?? 0);
       let call = calls.get(index);
       if (!call) {
-        call = { id: rawCall.id ?? `call_${randomUUID().replaceAll("-", "")}`, itemId: `fc_${randomUUID().replaceAll("-", "")}`, name: rawCall.function?.name ?? "", arguments: "", outputIndex: nextOutput++ };
+        call = { id: rawCall.id ?? `call_${randomUUID().replaceAll("-", "")}`, itemId: "", name: "", arguments: "", outputIndex: nextOutput++, started: false, emittedArguments: 0 };
         calls.set(index, call);
-        emit({ type: "response.output_item.added", output_index: call.outputIndex, item: { id: call.itemId, type: "function_call", status: "in_progress", call_id: call.id, name: call.name, arguments: "" } });
       }
       if (rawCall.function?.name) call.name = rawCall.function.name;
-      if (rawCall.function?.arguments) {
-        call.arguments += rawCall.function.arguments;
-        emit({ type: "response.function_call_arguments.delta", item_id: call.itemId, output_index: call.outputIndex, delta: rawCall.function.arguments });
+      if (rawCall.function?.arguments) call.arguments += rawCall.function.arguments;
+      if (!call.started && call.name) {
+        const custom = customNames.has(call.name);
+        call.itemId = `${custom ? "ctc" : "fc"}_${randomUUID().replaceAll("-", "")}`;
+        call.started = true;
+        emit({
+          type: "response.output_item.added", output_index: call.outputIndex,
+          item: custom
+            ? { id: call.itemId, type: "custom_tool_call", status: "in_progress", call_id: call.id, name: call.name, input: "" }
+            : { id: call.itemId, type: "function_call", status: "in_progress", call_id: call.id, name: call.name, arguments: "" },
+        });
+      }
+      if (call.started && !customNames.has(call.name) && call.arguments.length > call.emittedArguments) {
+        const argumentDelta = call.arguments.slice(call.emittedArguments);
+        call.emittedArguments = call.arguments.length;
+        emit({ type: "response.function_call_arguments.delta", item_id: call.itemId, output_index: call.outputIndex, delta: argumentDelta });
       }
     }
   }
@@ -291,8 +360,29 @@ async function proxyStream(upstream: Response, res: ServerResponse, body: Record
     indexedOutput.push({ outputIndex: messageOutputIndex, item }); emit({ type: "response.output_item.done", output_index: messageOutputIndex, item });
   }
   for (const call of [...calls.values()].sort((a, b) => a.outputIndex - b.outputIndex)) {
-    emit({ type: "response.function_call_arguments.done", item_id: call.itemId, output_index: call.outputIndex, arguments: call.arguments });
-    const item = { id: call.itemId, type: "function_call", status: "completed", call_id: call.id, name: call.name, arguments: call.arguments };
+    const custom = customNames.has(call.name);
+    if (!call.started) {
+      call.itemId = `${custom ? "ctc" : "fc"}_${randomUUID().replaceAll("-", "")}`;
+      emit({
+        type: "response.output_item.added", output_index: call.outputIndex,
+        item: custom
+          ? { id: call.itemId, type: "custom_tool_call", status: "in_progress", call_id: call.id, name: call.name, input: "" }
+          : { id: call.itemId, type: "function_call", status: "in_progress", call_id: call.id, name: call.name, arguments: "" },
+      });
+    }
+    let item: RecordJson;
+    if (custom) {
+      const input = customToolInput(call.arguments);
+      if (input) emit({ type: "response.custom_tool_call_input.delta", item_id: call.itemId, output_index: call.outputIndex, delta: input });
+      emit({ type: "response.custom_tool_call_input.done", item_id: call.itemId, output_index: call.outputIndex, input });
+      item = { id: call.itemId, type: "custom_tool_call", status: "completed", call_id: call.id, name: call.name, input };
+    } else {
+      if (call.arguments.length > call.emittedArguments) {
+        emit({ type: "response.function_call_arguments.delta", item_id: call.itemId, output_index: call.outputIndex, delta: call.arguments.slice(call.emittedArguments) });
+      }
+      emit({ type: "response.function_call_arguments.done", item_id: call.itemId, output_index: call.outputIndex, arguments: call.arguments });
+      item = { id: call.itemId, type: "function_call", status: "completed", call_id: call.id, name: call.name, arguments: call.arguments };
+    }
     indexedOutput.push({ outputIndex: call.outputIndex, item }); emit({ type: "response.output_item.done", output_index: call.outputIndex, item });
   }
   const output = indexedOutput.sort((a, b) => a.outputIndex - b.outputIndex).map(({ item }) => item);
@@ -326,7 +416,7 @@ export function createHandler(config: GatewayConfig) {
       if (body.stream) return await proxyStream(upstream, res, body);
       const result = await upstream.json() as RecordJson;
       const id = `resp_${randomUUID().replaceAll("-", "")}`;
-      return json(res, 200, baseResponse(id, Math.floor(Date.now() / 1000), body, "completed", outputFromChoice(result.choices?.[0] ?? {}), usageFrom(result.usage)));
+      return json(res, 200, baseResponse(id, Math.floor(Date.now() / 1000), body, "completed", outputFromChoice(result.choices?.[0] ?? {}, body), usageFrom(result.usage)));
     } catch (error) {
       if (!res.headersSent) return apiError(res, 502, error instanceof Error ? error.message : "Upstream request failed", "upstream_error");
       res.destroy(error instanceof Error ? error : undefined);

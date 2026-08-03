@@ -5,7 +5,7 @@ metadata:
   namespace: opencode-responses-gateway
 data:
   config.toml: |
-    model = "mimo-v2.5-free"
+    model = "deepseek-v4-flash-free"
     model_provider = "opencode_gateway"
     approval_policy = "never"
     sandbox_mode = "danger-full-access"
@@ -53,17 +53,17 @@ spec:
             - |
               set -eu
               codex --version
-              printf 'alpha\nbeta\n' > input.txt
+              printf 'alpha\n' > input.txt
               set +e
-              codex exec --skip-git-repo-check --json 'Read input.txt. Use the shell tool to create result.txt containing exactly ALPHA-BETA followed by a newline. Then use the shell tool again to read result.txt. Only after both tool steps succeed, answer exactly MULTISTEP-OK.' > codex-events.jsonl 2> codex-stderr.log
+              codex exec --skip-git-repo-check --json 'Read input.txt. Use the apply_patch tool to replace alpha with BETA in input.txt. Then use the shell tool to read input.txt. Only after both tool steps succeed, answer exactly CUSTOM-TOOL-OK.' > codex-events.jsonl 2> codex-stderr.log
               codex_status=$?
               set -e
               echo "codex_exit=$codex_status"
               if [ -s codex-stderr.log ]; then sed -n '1,100p' codex-stderr.log; fi
               if [ "$codex_status" -ne 0 ]; then tail -40 codex-events.jsonl; exit "$codex_status"; fi
-              test "$(cat result.txt)" = "ALPHA-BETA"
-              grep -q 'MULTISTEP-OK' codex-events.jsonl
-              echo '{"realCodexCli":"passed","multiStepTools":true,"workspaceIsolated":true}'
+              test "$(cat input.txt)" = "BETA"
+              grep -q 'CUSTOM-TOOL-OK' codex-events.jsonl
+              echo '{"realCodexCli":"passed","deepseekV4FlashFree":true,"fileEdit":true,"functionContinuation":true,"workspaceIsolated":true}'
           volumeMounts:
             - { name: codex-install, mountPath: /opt/codex, readOnly: true }
             - { name: codex-home, mountPath: /isolated-codex-home }
