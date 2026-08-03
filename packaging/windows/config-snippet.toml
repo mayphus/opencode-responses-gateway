@@ -1,0 +1,12 @@
+model = "deepseek-v4-flash-free"
+model_provider = "local_opencode_gateway"
+model_reasoning_effort = "medium"
+
+[model_providers.local_opencode_gateway]
+name = "Local OpenCode Responses Gateway"
+base_url = "http://127.0.0.1:8080/v1"
+wire_api = "responses"
+env_key = "OPENAI_API_KEY"
+request_max_retries = 0
+stream_max_retries = 0
+stream_idle_timeout_ms = 300000

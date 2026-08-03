@@ -17,6 +17,16 @@ The default upstream is OpenCode Zen's chat-completions endpoint. Set `OPENCODE_
 npm test
 ```
 
+## Portable Windows package
+
+Build a self-contained Windows x64 zip with the official Node runtime:
+
+```sh
+sh scripts/build-windows-portable.sh
+```
+
+The package runs locally on `127.0.0.1:8080`, needs no global Node or Docker installation, and stores the OpenCode key using Windows DPAPI for the current user. See `README-WINDOWS.txt` inside the generated zip.
+
 The Kubernetes manifests expose PB62 NodePort `32094` only to the `192.168.36.0/24` LAN and to in-cluster client pods labeled `access: gateway`. LAN clients do not need a bearer token. The real provider credential is loaded only from Kubernetes Secret `opencode-credentials`; it is never placed in a manifest.
 
 `k8s/real-zen-smoke.yaml` and `k8s/real-zen-inspect.yaml` are direct-provider probes. `k8s/real-gateway-e2e.yaml` verifies non-streaming text, Responses SSE events, and a complete function-call/output round trip through the gateway.
