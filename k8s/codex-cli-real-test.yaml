@@ -62,8 +62,15 @@ spec:
               if [ -s codex-stderr.log ]; then sed -n '1,100p' codex-stderr.log; fi
               if [ "$codex_status" -ne 0 ]; then tail -40 codex-events.jsonl; exit "$codex_status"; fi
               test "$(cat input.txt)" = "BETA"
-              grep -q 'CUSTOM-TOOL-OK' codex-events.jsonl
-              echo '{"realCodexCli":"passed","deepseekV4FlashFree":true,"fileEdit":true,"functionContinuation":true,"workspaceIsolated":true}'
+              set +e
+              codex exec resume --last --skip-git-repo-check --json 'This is a second user turn. Answer exactly SECOND-TURN-OK.' > codex-resume-events.jsonl 2> codex-resume-stderr.log
+              resume_status=$?
+              set -e
+              echo "codex_resume_exit=$resume_status"
+              if [ -s codex-resume-stderr.log ]; then sed -n '1,100p' codex-resume-stderr.log; fi
+              if [ "$resume_status" -ne 0 ]; then tail -40 codex-resume-events.jsonl; exit "$resume_status"; fi
+              grep -q 'SECOND-TURN-OK' codex-resume-events.jsonl
+              echo '{"realCodexCli":"passed","deepseekV4FlashFree":true,"fileEdit":true,"functionContinuation":true,"secondUserTurn":true,"workspaceIsolated":true}'
           volumeMounts:
             - { name: codex-install, mountPath: /opt/codex, readOnly: true }
             - { name: codex-home, mountPath: /isolated-codex-home }
