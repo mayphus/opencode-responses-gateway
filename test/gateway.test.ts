@@ -75,6 +75,40 @@ test("preserves opaque reasoning state for multi-step tool calls", () => {
   assert.equal(chat.messages[0].tool_calls[0].id, "call_1");
 });
 
+test("carries reasoning across sequential tool calls in one user turn", () => {
+  const encoded = "opencode-reasoning-v1:" + Buffer.from("provider-thought-state").toString("base64");
+  const chat = toChatRequest({ model: "test", input: [
+    { type: "message", role: "user", content: "run several checks" },
+    { type: "reasoning", id: "rs_1", summary: [], encrypted_content: encoded },
+    { type: "function_call", call_id: "call_1", name: "shell", arguments: "{}" },
+    { type: "function_call_output", call_id: "call_1", output: "one" },
+    { type: "function_call", call_id: "call_2", name: "shell", arguments: "{}" },
+    { type: "function_call_output", call_id: "call_2", output: "two" },
+    { type: "function_call", call_id: "call_3", name: "shell", arguments: "{}" },
+    { type: "function_call_output", call_id: "call_3", output: "three" },
+  ] });
+  const assistants = chat.messages.filter((message: any) => message.role === "assistant");
+  assert.equal(assistants.length, 3);
+  assert.deepEqual(assistants.map((message: any) => message.reasoning_content), [
+    "provider-thought-state", "provider-thought-state", "provider-thought-state",
+  ]);
+});
+
+test("does not carry reasoning into a new user turn", () => {
+  const encoded = "opencode-reasoning-v1:" + Buffer.from("provider-thought-state").toString("base64");
+  const chat = toChatRequest({ model: "test", input: [
+    { type: "message", role: "user", content: "first turn" },
+    { type: "reasoning", id: "rs_1", summary: [], encrypted_content: encoded },
+    { type: "function_call", call_id: "call_1", name: "shell", arguments: "{}" },
+    { type: "function_call_output", call_id: "call_1", output: "one" },
+    { type: "message", role: "assistant", content: "done" },
+    { type: "message", role: "user", content: "second turn" },
+    { type: "function_call", call_id: "call_2", name: "shell", arguments: "{}" },
+  ] });
+  const assistants = chat.messages.filter((message: any) => message.role === "assistant");
+  assert.equal(assistants.at(-1).reasoning_content, undefined);
+});
+
 test("merges replayed reasoning with its assistant text", () => {
   const encoded = "opencode-reasoning-v1:" + Buffer.from("provider-thought-state").toString("base64");
   const chat = toChatRequest({ model: "test", input: [
@@ -115,6 +149,11 @@ test("omits Chat tool controls when no client-executable tools remain", () => {
   assert.equal(chat.tools, undefined);
   assert.equal(chat.tool_choice, undefined);
   assert.equal(chat.parallel_tool_calls, undefined);
+});
+
+test("forwards Responses reasoning effort to Chat completions", () => {
+  const chat = toChatRequest({ model: "test", input: "think", reasoning: { effort: "medium" } });
+  assert.equal(chat.reasoning_effort, "medium");
 });
 
 test("rejects images instead of silently dropping them", () => {

@@ -111,12 +111,14 @@ export function toChatRequest(body: RecordJson): RecordJson {
     pendingAssistant = undefined;
   };
 
+  let activeReasoningContent: string | undefined;
   for (const raw of input) {
     if (!raw || typeof raw !== "object") continue;
     const item = raw as RecordJson;
     if (item.type === "reasoning") {
       const reasoningContent = decodeReasoning(item.encrypted_content);
       if (reasoningContent) {
+        activeReasoningContent = reasoningContent;
         if (!pendingAssistant) pendingAssistant = { role: "assistant", content: null };
         pendingAssistant.reasoning_content = reasoningContent;
       }
@@ -124,6 +126,9 @@ export function toChatRequest(body: RecordJson): RecordJson {
     }
     if (item.type === "function_call" || item.type === "custom_tool_call") {
       if (!pendingAssistant) pendingAssistant = { role: "assistant", content: null };
+      if (!pendingAssistant.reasoning_content && activeReasoningContent) {
+        pendingAssistant.reasoning_content = activeReasoningContent;
+      }
       if (!pendingAssistant.tool_calls) pendingAssistant.tool_calls = [];
       pendingAssistant.tool_calls.push({
         id: item.call_id ?? item.id,
@@ -148,13 +153,19 @@ export function toChatRequest(body: RecordJson): RecordJson {
       messages.push({ role: "tool", tool_call_id: item.call_id, content: textFromContent(item.output) || String(item.output ?? "") });
     } else if (item.type === "message" || item.role) {
       const role = item.role === "developer" ? "system" : item.role;
-      if (["system", "user"].includes(role)) messages.push({ role, content: textFromContent(item.content) });
+      if (["system", "user"].includes(role)) {
+        activeReasoningContent = undefined;
+        messages.push({ role, content: textFromContent(item.content) });
+      }
     }
   }
   flushAssistant();
 
   const request: RecordJson = { model: body.model, messages, stream: Boolean(body.stream) };
   if (body.max_output_tokens != null) request.max_tokens = body.max_output_tokens;
+  if (typeof body.reasoning?.effort === "string" && body.reasoning.effort) {
+    request.reasoning_effort = body.reasoning.effort;
+  }
   for (const field of ["temperature", "top_p", "seed"]) {
     if (body[field] != null) request[field] = body[field];
   }

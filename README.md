@@ -6,7 +6,7 @@ The default upstream is OpenCode Zen's chat-completions endpoint. Set `OPENCODE_
 
 ## Limits
 
-- Text, function tools, and free-form custom tools such as Codex `apply_patch` are supported. Custom tools are represented upstream as functions with one string `input`, then restored to native `custom_tool_call` items and streaming events. The gateway does not rewrite or repair tool input.
+- Text, reasoning effort, function tools, and free-form custom tools such as Codex `apply_patch` are supported. Custom tools are represented upstream as functions with one string `input`, then restored to native `custom_tool_call` items and streaming events. The gateway does not rewrite or repair tool input.
 - Images are explicitly rejected instead of silently discarded or routed through a sidecar. Files, audio, reasoning summaries, hosted tools, tool search, namespace tools, and structured-output translation are not supported.
 - Stateless: `previous_response_id` is rejected. Clients must send full conversation input, including prior function/custom calls and outputs.
 - Only models served through OpenCode's chat-completions endpoint are compatible. Some Zen models already use Responses natively and do not need this gateway.
