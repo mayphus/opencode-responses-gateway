@@ -75,6 +75,28 @@ test("preserves opaque reasoning state for multi-step tool calls", () => {
   assert.equal(chat.messages[0].tool_calls[0].id, "call_1");
 });
 
+test("merges replayed reasoning with its assistant text", () => {
+  const encoded = "opencode-reasoning-v1:" + Buffer.from("provider-thought-state").toString("base64");
+  const chat = toChatRequest({ model: "test", input: [
+    { type: "message", role: "user", content: "first question" },
+    { type: "reasoning", id: "rs_1", summary: [], encrypted_content: encoded },
+    { type: "message", role: "assistant", content: [{ type: "output_text", text: "first answer" }] },
+    { type: "message", role: "user", content: "follow up" },
+  ] });
+  assert.deepEqual(chat.messages.map((m: any) => m.role), ["user", "assistant", "user"]);
+  assert.equal(chat.messages[1].content, "first answer");
+  assert.equal(chat.messages[1].reasoning_content, "provider-thought-state");
+});
+
+test("omits empty assistant records rejected by Chat APIs", () => {
+  const chat = toChatRequest({ model: "test", input: [
+    { type: "message", role: "user", content: "first question" },
+    { type: "message", role: "assistant", content: [] },
+    { type: "message", role: "user", content: "follow up" },
+  ] });
+  assert.deepEqual(chat.messages.map((m: any) => m.role), ["user", "user"]);
+});
+
 test("translates free-form custom tools and their history through Chat functions", () => {
   const chat = toChatRequest({ model: "test", input: [
     { type: "message", role: "user", content: "edit it" },

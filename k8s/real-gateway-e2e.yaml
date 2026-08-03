@@ -36,6 +36,13 @@ spec:
               const text = await call({ model: 'deepseek-v4-flash-free', input: 'Reply with exactly: gateway-ok', max_output_tokens: 96 });
               const outputText = text?.output?.find((item) => item.type === 'message')?.content?.[0]?.text;
               if (typeof outputText !== 'string' || outputText.length === 0) throw new Error('non-stream text missing');
+              const replay = await call({ model: 'deepseek-v4-flash-free', input: [
+                { type: 'message', role: 'user', content: 'Reply with exactly: gateway-ok' },
+                ...text.output,
+                { type: 'message', role: 'user', content: 'Now reply with exactly: replay-ok' },
+              ], max_output_tokens: 96 });
+              const replayText = replay?.output?.find((item) => item.type === 'message')?.content?.[0]?.text;
+              if (typeof replayText !== 'string' || replayText.length === 0) throw new Error('replayed conversation text missing');
               const streamResponse = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'deepseek-v4-flash-free', input: 'Reply with exactly: stream-ok', max_output_tokens: 96, stream: true }) });
               const events = await streamResponse.text();
               for (const expected of ['response.created', 'response.output_text.delta', 'response.completed']) if (!events.includes(expected)) throw new Error(`stream event missing: ${expected}`);
@@ -65,4 +72,4 @@ spec:
               ], tools: customTools, tool_choice: 'none', max_output_tokens: 512 });
               const customFinalText = customSecond.output?.find((item) => item.type === 'message')?.content?.[0]?.text;
               if (typeof customFinalText !== 'string' || customFinalText.length === 0) throw new Error('custom tool round-trip final text missing');
-              console.log(JSON.stringify({ gatewayE2E: 'passed', servicePath: true, nonStream: true, streaming: true, toolRoundTrip: true, customToolStreaming: true, customToolRoundTrip: true, outputCharacters: { text: outputText.length, final: finalText.length, customFinal: customFinalText.length } }));
+              console.log(JSON.stringify({ gatewayE2E: 'passed', servicePath: true, nonStream: true, historyReplay: true, streaming: true, toolRoundTrip: true, customToolStreaming: true, customToolRoundTrip: true, outputCharacters: { text: outputText.length, replay: replayText.length, final: finalText.length, customFinal: customFinalText.length } }));

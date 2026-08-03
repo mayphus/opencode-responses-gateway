@@ -103,7 +103,11 @@ export function toChatRequest(body: RecordJson): RecordJson {
 
   let pendingAssistant: RecordJson | undefined;
   const flushAssistant = () => {
-    if (pendingAssistant) messages.push(pendingAssistant);
+    if (pendingAssistant) {
+      const hasContent = typeof pendingAssistant.content === "string" && pendingAssistant.content.length > 0;
+      const hasToolCalls = Array.isArray(pendingAssistant.tool_calls) && pendingAssistant.tool_calls.length > 0;
+      if (hasContent || hasToolCalls) messages.push(pendingAssistant);
+    }
     pendingAssistant = undefined;
   };
 
@@ -133,12 +137,18 @@ export function toChatRequest(body: RecordJson): RecordJson {
       });
       continue;
     }
+    if ((item.type === "message" || item.role) && item.role === "assistant") {
+      if (!pendingAssistant) pendingAssistant = { role: "assistant", content: null };
+      const content = textFromContent(item.content);
+      if (content) pendingAssistant.content = `${pendingAssistant.content ?? ""}${content}`;
+      continue;
+    }
     flushAssistant();
     if (item.type === "function_call_output" || item.type === "custom_tool_call_output") {
       messages.push({ role: "tool", tool_call_id: item.call_id, content: textFromContent(item.output) || String(item.output ?? "") });
     } else if (item.type === "message" || item.role) {
       const role = item.role === "developer" ? "system" : item.role;
-      if (["system", "user", "assistant"].includes(role)) messages.push({ role, content: textFromContent(item.content) });
+      if (["system", "user"].includes(role)) messages.push({ role, content: textFromContent(item.content) });
     }
   }
   flushAssistant();
