@@ -21,6 +21,18 @@ test("reports a WinGet REST source information envelope", async () => {
   });
 });
 
+test("shows a useful status at the browser-facing root", async () => {
+  const response = await handleRequest(new Request("https://winget.mayphus.org/"));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    status: "ok",
+    service: "Mayphus WinGet source",
+    sourceUrl: "https://winget.mayphus.org/api/",
+    packageIdentifier: packageMetadata.identifier,
+    packageVersion: packageMetadata.version,
+  });
+});
+
 test("keeps source metadata synchronized with the CLI release", async () => {
   const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")) as {
     version: string;

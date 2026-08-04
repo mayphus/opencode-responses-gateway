@@ -160,6 +160,15 @@ export async function handleRequest(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const path = normalizePath(url.pathname);
 
+  if (request.method === "GET" && path === "/") {
+    return json({
+      status: "ok",
+      service: "Mayphus WinGet source",
+      sourceUrl: "https://winget.mayphus.org/api/",
+      packageIdentifier: packageMetadata.identifier,
+      packageVersion: packageMetadata.version,
+    });
+  }
   if (request.method === "GET" && path === "/healthz") {
     return json({ status: "ok", packageVersion: packageMetadata.version });
   }
