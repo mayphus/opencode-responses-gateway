@@ -3,8 +3,14 @@
   "name": "opencode-gateway-winget-source",
   "main": "worker/index.ts",
   "compatibility_date": "2026-08-04",
-  "workers_dev": true,
+  "workers_dev": false,
   "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "winget.mayphus.org",
+      "custom_domain": true
+    }
+  ],
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1

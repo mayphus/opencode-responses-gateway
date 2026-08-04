@@ -93,7 +93,7 @@ jobs:
         run: >-
           winget source add
           --name mayphus
-          --arg https://opencode-gateway-winget-source.mayphus.workers.dev/api/
+          --arg https://winget.mayphus.org/api/
           --type Microsoft.Rest
           --explicit
           --accept-source-agreements

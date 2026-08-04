@@ -26,6 +26,7 @@ read that user's configuration and invoke their credential store.
 | Low | Historical Kubernetes files disclosed personal LAN topology and included mutable runtime installation probes. | Personal deployment and probe manifests were removed from the public CLI repository. |
 | Low | Settings and PID writes were not atomic, and Unix directory permissions were implicit. | Configuration writes use same-directory atomic replacement with mode `0600`; private directories use `0700`; Windows setup installs a user-only ACL. |
 | Low | A custom package source could add a mutable service, secret, or unrelated package surface. | The WinGet source is a stateless 8 KiB Worker with no bindings or secrets, exposes one package, and points only to immutable release URLs with verified SHA-256 hashes. |
+| Low | Cloudflare's shared `workers.dev` hostname is not reliably reachable from mainland China. | The source uses the dedicated `winget.mayphus.org` custom domain; `workers.dev` is disabled, and HTTPS access is verified from PB62's China network. |
 
 ## Verification
 

@@ -33,7 +33,7 @@ Credential backends:
 On Windows, add the small read-only Mayphus source once, then install:
 
 ```powershell
-winget source add --name mayphus --arg https://opencode-gateway-winget-source.mayphus.workers.dev/api/ --type Microsoft.Rest --explicit --accept-source-agreements
+winget source add --name mayphus --arg https://winget.mayphus.org/api/ --type Microsoft.Rest --explicit --accept-source-agreements
 winget install Mayphus.OpenCodeResponsesGateway --source mayphus
 opencode-gateway setup
 ```

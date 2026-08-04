@@ -5,13 +5,13 @@ submitting to `microsoft/winget-pkgs`. It publishes only immutable GitHub releas
 URLs and their SHA-256 hashes. The source runs at:
 
 ```text
-https://opencode-gateway-winget-source.mayphus.workers.dev/api/
+https://winget.mayphus.org/api/
 ```
 
 Add it once from an Administrator terminal:
 
 ```powershell
-winget source add --name mayphus --arg https://opencode-gateway-winget-source.mayphus.workers.dev/api/ --type Microsoft.Rest --explicit --accept-source-agreements
+winget source add --name mayphus --arg https://winget.mayphus.org/api/ --type Microsoft.Rest --explicit --accept-source-agreements
 ```
 
 Install and upgrade from a normal terminal:
