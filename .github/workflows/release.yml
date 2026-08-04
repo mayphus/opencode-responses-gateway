@@ -48,7 +48,7 @@ jobs:
         run: npm run typecheck
       - name: Verify tag matches package version
         shell: bash
-        run: test "${GITHUB_REF_NAME}" = "v$(node -p 'require(\"./package.json\").version')"
+        run: test "${GITHUB_REF_NAME}" = "v$(node -p 'require("./package.json").version')"
       - name: Build and smoke-test native CLI
         shell: bash
         run: bash scripts/build-cli.sh
