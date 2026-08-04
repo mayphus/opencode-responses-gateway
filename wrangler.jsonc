@@ -1,0 +1,12 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "opencode-gateway-winget-source",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-08-04",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}

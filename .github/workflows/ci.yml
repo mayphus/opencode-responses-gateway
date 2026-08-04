@@ -45,6 +45,11 @@ jobs:
         run: npm test
       - name: Type-check
         run: npm run typecheck
+      - name: Type-check WinGet source
+        run: npm run typecheck:worker
+      - name: Bundle WinGet source
+        if: matrix.name == 'Linux x64'
+        run: npm run build:winget-source
       - name: Build and smoke-test native CLI
         shell: bash
         run: bash scripts/build-cli.sh
@@ -75,3 +80,37 @@ jobs:
         run: npm audit --audit-level=high
       - name: Verify registry signatures
         run: npm audit signatures
+
+  winget-install:
+    name: WinGet live install
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: windows-2025
+    steps:
+      - name: Check out source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Add the explicit Mayphus source
+        shell: pwsh
+        run: >-
+          winget source add
+          --name mayphus
+          --arg https://opencode-gateway-winget-source.mayphus.workers.dev/api/
+          --type Microsoft.Rest
+          --explicit
+          --accept-source-agreements
+          --disable-interactivity
+      - name: Install and verify the released CLI
+        shell: pwsh
+        run: |
+          winget install --id Mayphus.OpenCodeResponsesGateway --exact --source mayphus --accept-source-agreements --accept-package-agreements --disable-interactivity
+          $executable = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\opencode-gateway.exe"
+          if (-not (Test-Path $executable)) { throw "WinGet did not create the portable command alias" }
+          $expectedVersion = (Get-Content package.json | ConvertFrom-Json).version
+          $actualVersion = (& $executable version).Trim()
+          if ($actualVersion -ne $expectedVersion) { throw "Expected version $expectedVersion, got $actualVersion" }
+      - name: Remove test installation and source
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          winget uninstall --id Mayphus.OpenCodeResponsesGateway --exact --source mayphus --disable-interactivity
+          winget source remove --name mayphus --disable-interactivity

@@ -4,7 +4,8 @@ Review date: 2026-08-04
 
 Scope: gateway request handling, provider credentials, local authentication,
 configuration writes, process lifecycle, build dependencies, release artifacts,
-GitHub Actions, and files intended for public publication.
+GitHub Actions, the custom WinGet source, and files intended for public
+publication.
 
 ## Threat model
 
@@ -24,6 +25,7 @@ read that user's configuration and invoke their credential store.
 | Medium | The portable build depended on semver ranges and a mutable local build environment. | Build dependencies are exactly pinned with an npm lockfile; CI uses an exact Node version and full action commit SHAs. |
 | Low | Historical Kubernetes files disclosed personal LAN topology and included mutable runtime installation probes. | Personal deployment and probe manifests were removed from the public CLI repository. |
 | Low | Settings and PID writes were not atomic, and Unix directory permissions were implicit. | Configuration writes use same-directory atomic replacement with mode `0600`; private directories use `0700`; Windows setup installs a user-only ACL. |
+| Low | A custom package source could add a mutable service, secret, or unrelated package surface. | The WinGet source is a stateless 8 KiB Worker with no bindings or secrets, exposes one package, and points only to immutable release URLs with verified SHA-256 hashes. |
 
 ## Verification
 
@@ -32,6 +34,10 @@ read that user's configuration and invoke their credential store.
   function/custom-tool round trips.
 - CI runs tests and builds/smoke-tests native executables on Linux, macOS, and
   Windows, for x64 and arm64.
+- WinGet contract tests cover source discovery, exact/search matching, manifest
+  selection, portable installers, invalid input, and unsupported methods. A
+  Windows Actions job installs the release from the deployed source and checks
+  the installed CLI version.
 - `npm audit` reports no known vulnerabilities. CI also checks npm registry
   signatures, CodeQL, and pull-request dependency changes.
 - The complete local Git history was scanned for common provider, GitHub, AWS,
@@ -39,6 +45,8 @@ read that user's configuration and invoke their credential store.
   were found before publication.
 - Release jobs grant write permissions only to the jobs that attest or publish
   artifacts. All referenced GitHub actions are pinned to full commit SHAs.
+- The WinGet service has no credential or storage bindings. Its published x64
+  and arm64 hashes were compared directly with GitHub Release asset digests.
 
 ## Residual risks
 
@@ -49,3 +57,6 @@ read that user's configuration and invoke their credential store.
   servers can supply `OPENCODE_API_KEY` to the `serve` process instead.
 - Native Luna features are forwarded unchanged. Their data retention and hosted
   tool behavior remain governed by OpenCode Go and the upstream model provider.
+- Updating the custom WinGet source is an explicit release step; a forgotten
+  source deployment delays `winget upgrade` but cannot change an installed
+  binary or silently select an unverified archive.

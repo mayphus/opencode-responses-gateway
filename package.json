@@ -8,17 +8,25 @@
     "cli": "node --experimental-strip-types src/cli.ts",
     "build": "sh scripts/build-cli.sh",
     "build:windows": "sh scripts/build-cli.sh",
-    "check": "npm run typecheck && npm test && npm run build",
+    "check": "npm run typecheck && npm run typecheck:worker && npm test && npm run build && npm run build:winget-source",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test --test-reporter=spec test/gateway.test.ts"
+    "typecheck:worker": "tsc --project tsconfig.worker.json",
+    "test": "node --experimental-strip-types --test --test-reporter=spec test/*.test.ts",
+    "build:winget-source": "wrangler deploy --dry-run --outdir .wrangler-dist",
+    "deploy:winget-source": "wrangler deploy"
   },
   "engines": {
     "node": ">=22.18"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "5.20260801.1",
     "@types/node": "24.13.3",
     "esbuild": "0.25.12",
     "postject": "1.0.0-alpha.6",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "wrangler": "4.118.0"
+  },
+  "overrides": {
+    "undici": "7.29.0"
   }
 }

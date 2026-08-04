@@ -30,15 +30,17 @@ Credential backends:
 | macOS | x64, arm64 | Login Keychain | LaunchAgent |
 | Linux (glibc) | x64, arm64 | Secret Service (`secret-tool`) | systemd user service |
 
-Windows publication is prepared for:
+On Windows, add the small read-only Mayphus source once, then install:
 
 ```powershell
-winget install Mayphus.OpenCodeResponsesGateway
+winget source add --name mayphus --arg https://opencode-gateway-winget-source.mayphus.workers.dev/api/ --type Microsoft.Rest --explicit --accept-source-agreements
+winget install Mayphus.OpenCodeResponsesGateway --source mayphus
 opencode-gateway setup
 ```
 
-The WinGet command becomes available after the first tagged release and
-acceptance of the manifest into `microsoft/winget-pkgs`.
+The source-add command needs Administrator approval. Later releases use the
+normal command `winget upgrade Mayphus.OpenCodeResponsesGateway --source mayphus`.
+The package is not submitted to Microsoft's community repository.
 
 ## Commands
 
@@ -60,11 +62,14 @@ Node.js 24.14.1 is used for release builds.
 npm ci --ignore-scripts
 npm test
 npm run build
+npm run build:winget-source
 ```
 
 The build produces a native single-executable archive and SHA-256 checksum in
 `dist/`. GitHub Actions repeats the tests and native smoke test on six runners:
 Linux, macOS, and Windows, each on x64 and arm64.
+The Windows CI job also installs the published release through the live custom
+WinGet source and verifies the installed CLI version.
 
 ## Compatibility and security
 
