@@ -17,7 +17,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { createHandler } from "./gateway.ts";
 
-const VERSION = "0.3.1";
+const VERSION = "0.3.2";
 const APP_NAME = "OpenCodeResponsesGateway";
 const KEY_SERVICE = "org.mayphus.opencode-responses-gateway";
 const KEY_ACCOUNT = userInfo().username;
