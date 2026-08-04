@@ -57,7 +57,8 @@ node "$project_dir/scripts/smoke-cli.mjs" "$executable" "$version"
 if [ "$platform" = win32 ]; then
   archive="$dist_dir/${archive_name}.zip"
   rm -f "$archive"
-  7z a -bd -tzip "$archive" "$package_dir/*" >/dev/null
+  archive_windows=$(cygpath -w "$archive")
+  (cd "$package_dir" && 7z a -bd -tzip "$archive_windows" ./* >/dev/null)
 else
   archive="$dist_dir/${archive_name}.tar.gz"
   rm -f "$archive"
