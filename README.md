@@ -1,68 +1,77 @@
-# OpenCode Responses compatibility gateway
+# OpenCode Responses Gateway
 
-A narrow gateway that gives ChatGPT Desktop one local OpenAI Responses endpoint
-for two OpenCode paths:
+A small local CLI that lets ChatGPT Desktop or Codex use OpenCode models through
+an OpenAI Responses-compatible endpoint.
 
-- `deepseek-v4-flash`: translate Responses to Chat Completions.
-- `gpt-5.6-luna`: transparently forward OpenCode Go's native Responses API,
-  including image and PDF input fields.
+- `deepseek-v4-flash`: translates Responses requests to Chat Completions.
+- `gpt-5.6-luna`: transparently forwards OpenCode Go's native Responses API,
+  including image and PDF inputs.
 
-The gateway never forwards the ChatGPT client credential upstream. The provider
-key is configured separately and, on Windows, encrypted for the current user
-with DPAPI. The server binds to `127.0.0.1` in the CLI setup.
+The gateway listens only on `127.0.0.1`, requires a generated local bearer
+token, and keeps the provider key in the operating system's credential store.
 
-See [the feature matrix](docs/responses-compatibility.md) for the exact current
-coverage and the difference between translated and native modes.
+## Install and set up
 
-## Windows CLI and WinGet
+Download the archive for your OS and architecture from GitHub Actions or a
+tagged release, put `opencode-gateway` on `PATH`, then run:
 
-The intended user experience is:
+```sh
+opencode-gateway setup
+```
+
+Setup selects a model, saves the provider key securely, creates an isolated
+Codex profile, installs per-user startup, starts the service, and checks health.
+
+Credential backends:
+
+| Platform | Architectures | Provider-key storage | Startup |
+|---|---|---|---|
+| Windows | x64, arm64 | DPAPI | Per-user Startup shortcut |
+| macOS | x64, arm64 | Login Keychain | LaunchAgent |
+| Linux (glibc) | x64, arm64 | Secret Service (`secret-tool`) | systemd user service |
+
+Windows publication is prepared for:
 
 ```powershell
 winget install Mayphus.OpenCodeResponsesGateway
 opencode-gateway setup
 ```
 
-`setup` asks for the key and model, writes an isolated Codex profile, selects
-that profile without replacing the rest of `~/.codex/config.toml`, installs a
-per-user startup shortcut, starts the gateway, and checks health.
+The WinGet command becomes available after the first tagged release and
+acceptance of the manifest into `microsoft/winget-pkgs`.
 
-Later, switching to Luna is one command:
+## Commands
 
-```powershell
-opencode-gateway configure luna
+```text
+opencode-gateway setup [deepseek|luna]
+opencode-gateway configure <deepseek|luna>
+opencode-gateway status
+opencode-gateway start
+opencode-gateway stop
+opencode-gateway restart
+opencode-gateway startup install|remove
 ```
 
-Other commands include `status`, `start`, `stop`, `restart`, and
-`startup install|remove`.
+## Build and test
 
-Build the WinGet-ready Windows x64 archive:
-
-```sh
-npm install
-npm run build:windows
-```
-
-The manifest template is under `packaging/winget`. Publication still requires a
-public immutable release URL and submission to the WinGet community repository.
-
-## Translation-mode limits
-
-- Text, reasoning effort, function tools, and free-form custom tools such as Codex `apply_patch` are supported. Custom tools are represented upstream as functions with one string `input`, then restored to native `custom_tool_call` items and streaming events. The gateway does not rewrite or repair tool input.
-- Images are explicitly rejected in DeepSeek mode instead of silently discarded
-  or routed through a sidecar. Files, audio, hosted tools, and structured-output
-  translation are not supported in that mode.
-- Stateless: `previous_response_id` is rejected. Clients must send full conversation input, including prior function/custom calls and outputs.
-- Native Responses models use transparent pass-through; the gateway remains
-  useful for local key protection, stable ChatGPT configuration, startup, and
-  switching between providers.
-
-## Test
+Node.js 24.14.1 is used for release builds.
 
 ```sh
+npm ci --ignore-scripts
 npm test
+npm run build
 ```
 
-The Kubernetes manifests expose PB62 NodePort `32094` only to the `192.168.36.0/24` LAN and to in-cluster client pods labeled `access: gateway`. LAN clients do not need a bearer token. The real provider credential is loaded only from Kubernetes Secret `opencode-credentials`; it is never placed in a manifest.
+The build produces a native single-executable archive and SHA-256 checksum in
+`dist/`. GitHub Actions repeats the tests and native smoke test on six runners:
+Linux, macOS, and Windows, each on x64 and arm64.
 
-`k8s/real-zen-smoke.yaml` and `k8s/real-zen-inspect.yaml` are direct-provider probes. `k8s/real-gateway-e2e.yaml` verifies non-streaming text, Responses SSE events, and a complete function-call/output round trip through the gateway.
+## Compatibility and security
+
+- [Responses API feature matrix](docs/responses-compatibility.md)
+- [Security review](docs/security-review.md)
+- [Security policy](SECURITY.md)
+
+DeepSeek mode rejects images rather than discarding or routing them through a
+sidecar. Luna mode forwards native Responses fields unchanged. The gateway does
+not add separate image or web-search providers.

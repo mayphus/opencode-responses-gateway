@@ -11,8 +11,15 @@ Moniker: opencode-gateway
 InstallerType: zip
 Installers:
   - Architecture: x64
-    InstallerUrl: __INSTALLER_URL__
-    InstallerSha256: __INSTALLER_SHA256__
+    InstallerUrl: __X64_INSTALLER_URL__
+    InstallerSha256: __X64_INSTALLER_SHA256__
+    NestedInstallerType: portable
+    NestedInstallerFiles:
+      - RelativeFilePath: opencode-gateway.exe
+        PortableCommandAlias: opencode-gateway
+  - Architecture: arm64
+    InstallerUrl: __ARM64_INSTALLER_URL__
+    InstallerSha256: __ARM64_INSTALLER_SHA256__
     NestedInstallerType: portable
     NestedInstallerFiles:
       - RelativeFilePath: opencode-gateway.exe

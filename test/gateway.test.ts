@@ -276,3 +276,38 @@ test("native Responses mode passes multimodal requests and SSE through unchanged
     ]);
   }
 });
+
+test("local bearer authentication protects model and response endpoints", async () => {
+  const secureGateway = createServer(createHandler({
+    upstreamUrl,
+    upstreamApiKey: "provider-secret",
+    gatewayApiKey: "local-secret",
+    configuredModel: "test",
+    instanceId: "instance-test",
+    requestTimeoutMs: 5000,
+  }));
+  await new Promise<void>((resolve) => secureGateway.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${(secureGateway.address() as any).port}`;
+  try {
+    const health: any = await (await fetch(`${url}/healthz`)).json();
+    assert.equal(health.instance_id, "instance-test");
+
+    const unauthenticated = await fetch(`${url}/v1/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "test", input: "hi" }),
+    });
+    assert.equal(unauthenticated.status, 401);
+    assert.equal((await fetch(`${url}/v1/models`)).status, 401);
+
+    const authenticated = await fetch(`${url}/v1/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer local-secret" },
+      body: JSON.stringify({ model: "test", input: "hi" }),
+    });
+    assert.equal(authenticated.status, 200);
+  } finally {
+    secureGateway.closeAllConnections();
+    await new Promise<void>((resolve) => secureGateway.close(() => resolve()));
+  }
+});

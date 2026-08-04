@@ -1,19 +1,24 @@
 {
   "name": "opencode-responses-gateway",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node --experimental-strip-types src/server.ts",
     "cli": "node --experimental-strip-types src/cli.ts",
-    "build:windows": "sh scripts/build-windows-cli.sh",
+    "build": "sh scripts/build-cli.sh",
+    "build:windows": "sh scripts/build-cli.sh",
+    "check": "npm run typecheck && npm test && npm run build",
+    "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test --test-reporter=spec test/gateway.test.ts"
   },
   "engines": {
     "node": ">=22.18"
   },
   "devDependencies": {
-    "esbuild": "^0.25.12",
-    "postject": "^1.0.0-alpha.6"
+    "@types/node": "24.13.3",
+    "esbuild": "0.25.12",
+    "postject": "1.0.0-alpha.6",
+    "typescript": "7.0.2"
   }
 }

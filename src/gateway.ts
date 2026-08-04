@@ -10,6 +10,7 @@ export interface GatewayConfig {
   upstreamApiKey?: string;
   gatewayApiKey?: string;
   configuredModel?: string;
+  instanceId?: string;
   requestTimeoutMs: number;
 }
 
@@ -279,7 +280,7 @@ async function readBody(req: IncomingMessage): Promise<RecordJson> {
   try { return JSON.parse(raw || "{}"); } catch { throw new Error("Request body is not valid JSON"); }
 }
 
-async function readRawBody(req: IncomingMessage): Promise<Uint8Array | undefined> {
+async function readRawBody(req: IncomingMessage): Promise<string | undefined> {
   const chunks: Buffer[] = [];
   let length = 0;
   for await (const chunk of req) {
@@ -288,7 +289,7 @@ async function readRawBody(req: IncomingMessage): Promise<Uint8Array | undefined
     if (length > 16 * 1024 * 1024) throw new Error("Request body is too large");
     chunks.push(value);
   }
-  return chunks.length ? Buffer.concat(chunks) : undefined;
+  return chunks.length ? Buffer.concat(chunks).toString("utf8") : undefined;
 }
 
 function sse(res: ServerResponse, event: RecordJson): void {
@@ -431,7 +432,12 @@ export function createHandler(config: GatewayConfig) {
   return async (req: IncomingMessage, res: ServerResponse) => {
     const requestUrl = new URL(req.url ?? "/", "http://gateway.local");
     if (req.method === "GET" && requestUrl.pathname === "/healthz") {
-      return json(res, 200, { status: "ok", wire_api: config.upstreamWireApi ?? "chat_completions", model: config.configuredModel ?? null });
+      return json(res, 200, {
+        status: "ok",
+        wire_api: config.upstreamWireApi ?? "chat_completions",
+        model: config.configuredModel ?? null,
+        instance_id: config.instanceId ?? null,
+      });
     }
     if (config.gatewayApiKey) {
       const presented = String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
