@@ -80,3 +80,7 @@ WinGet source and verifies the installed CLI version.
 DeepSeek mode rejects images rather than discarding or routing them through a
 sidecar. Luna mode forwards native Responses fields unchanged. The gateway does
 not add separate image or web-search providers.
+
+## Consolidated predecessor
+
+The former `mayphus/opencode-go-proxy` source and history are preserved in [`legacy/opencode-go-proxy`](legacy/opencode-go-proxy/). See [migration boundaries](legacy/README.md) and [provenance](docs/consolidation.md). Repository consolidation does not migrate running services, user configuration or stored data.
