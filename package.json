@@ -24,7 +24,7 @@
     "esbuild": "0.25.12",
     "postject": "1.0.0-alpha.6",
     "typescript": "7.0.2",
-    "wrangler": "4.118.0"
+    "wrangler": "4.135.0"
   },
   "overrides": {
     "undici": "7.29.0"
