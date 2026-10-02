@@ -16,6 +16,7 @@ import { basename, join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { createHandler } from "./gateway.ts";
+import { windowsPowerShellEnvironment, windowsPowerShellExecutable } from "./windows.ts";
 
 const VERSION = "0.3.2";
 const APP_NAME = "OpenCodeResponsesGateway";
@@ -63,9 +64,9 @@ function atomicWrite(path: string, content: string, mode = 0o600): void {
 
 function powershell(script: string, extraEnv: Record<string, string> = {}, input?: string): string {
   if (process.platform !== "win32") throw new Error("PowerShell credential operation is available only on Windows");
-  const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+  const result = spawnSync(windowsPowerShellExecutable(), ["-NoProfile", "-NonInteractive", "-Command", script], {
     encoding: "utf8",
-    env: { ...process.env, ...extraEnv },
+    env: windowsPowerShellEnvironment(process.env, extraEnv),
     input,
     windowsHide: true,
   });
@@ -151,12 +152,12 @@ async function promptHidden(prompt: string): Promise<string> {
 async function saveProviderKey(): Promise<void> {
   ensureAppDir();
   if (process.platform === "win32") {
-    const result = spawnSync("powershell.exe", ["-NoProfile", "-Command", [
+    const result = spawnSync(windowsPowerShellExecutable(), ["-NoProfile", "-Command", [
       "$ErrorActionPreference='Stop'",
       "$key=Read-Host 'Paste the OpenCode API key' -AsSecureString",
       "if($key.Length -eq 0){throw 'The OpenCode API key cannot be empty.'}",
       "$key | ConvertFrom-SecureString | Set-Content -LiteralPath $env:OCGW_KEY_PATH -Encoding UTF8",
-    ].join(";")], { env: { ...process.env, OCGW_KEY_PATH: windowsKeyPath }, stdio: "inherit" });
+    ].join(";")], { env: windowsPowerShellEnvironment(process.env, { OCGW_KEY_PATH: windowsKeyPath }), stdio: "inherit" });
     if (result.status !== 0) throw new Error("Could not save the OpenCode API key with Windows DPAPI");
     return;
   }

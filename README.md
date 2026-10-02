@@ -30,6 +30,8 @@ Credential backends:
 | macOS | x64, arm64 | Login Keychain | LaunchAgent |
 | Linux (glibc) | x64, arm64 | Secret Service (`secret-tool`) | systemd user service |
 
+On Windows, the CLI prefers PowerShell 7 when installed in its standard Program Files location and falls back to Windows PowerShell. Both hosts use the same per-user DPAPI credentials.
+
 On Windows, add the small read-only Mayphus source once, then install:
 
 ```powershell
