@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+import { windowsPowerShellEnvironment } from "../src/windows.ts";
 
 const [executable, expectedVersion] = process.argv.slice(2);
 if (!executable || !expectedVersion) throw new Error("Usage: smoke-cli.mjs <executable> <version>");
@@ -50,6 +52,10 @@ const child = spawn(executable, ["serve"], {
   windowsHide: true,
 });
 let childError = "";
+let childOutput = "";
+let spawnError;
+child.stdout.on("data", (chunk) => { childOutput += chunk; });
+child.once("error", (error) => { spawnError = error; });
 child.stderr.on("data", (chunk) => { childError += chunk; });
 try {
   let health;
@@ -60,8 +66,29 @@ try {
     } catch { /* still starting */ }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  assert.equal(health?.model, "smoke-model", childError || "CLI did not become healthy");
+  assert.equal(health?.model, "smoke-model", `CLI did not become healthy; exit=${child.exitCode}; signal=${child.signalCode}; spawn=${spawnError ?? "none"}; stdout=${childOutput}; stderr=${childError}`);
   assert.equal(typeof health?.instance_id, "string");
+  if (process.platform === "win32") {
+    const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", [
+      "$ErrorActionPreference='Stop'",
+      "$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User",
+      "$acl=Get-Acl -LiteralPath $env:OCGW_TEST_DIRECTORY",
+      "if(-not $acl.AreAccessRulesProtected){throw 'Directory ACL still inherits access rules'}",
+      "if($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value){throw 'Directory owner is not the current user'}",
+      "$secure=ConvertTo-SecureString 'gateway-smoke-dummy-key' -AsPlainText -Force",
+      "$cipher=$secure | ConvertFrom-SecureString",
+      "$decoded=[PSCredential]::new('opencode',($cipher | ConvertTo-SecureString))",
+      "if($decoded.GetNetworkCredential().Password -ne 'gateway-smoke-dummy-key'){throw 'DPAPI key round trip failed'}",
+      "$rules=$acl.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier])",
+      "if($rules.Count -ne 1 -or $rules[0].IdentityReference.Value -ne $sid.Value -or $rules[0].AccessControlType -ne 'Allow' -or $rules[0].FileSystemRights -ne 'FullControl'){throw 'Directory ACL is not restricted to the current user'}",
+    ].join(";")], {
+      encoding: "utf8",
+      env: windowsPowerShellEnvironment(process.env, { OCGW_TEST_DIRECTORY: directory }),
+      windowsHide: true,
+      timeout: 10_000,
+    });
+    assert.equal(result.status, 0, result.error?.message ?? result.stderr);
+  }
   assert.equal((await fetch(`http://127.0.0.1:${port}/v1/models`)).status, 401);
   const models = await fetch(`http://127.0.0.1:${port}/v1/models`, {
     headers: { authorization: `Bearer ${gatewayToken}` },
