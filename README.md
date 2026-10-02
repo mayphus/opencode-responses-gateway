@@ -27,6 +27,8 @@ Credential backends:
 | Platform | Architectures | Provider-key storage | Startup |
 |---|---|---|---|
 | Windows | x64, arm64 | DPAPI | Per-user Startup shortcut |
+
+On Windows, the CLI prefers PowerShell 7 when installed in its standard Program Files location and falls back to Windows PowerShell. Both hosts use the same per-user DPAPI credentials.
 | macOS | x64, arm64 | Login Keychain | LaunchAgent |
 | Linux (glibc) | x64, arm64 | Secret Service (`secret-tool`) | systemd user service |
 

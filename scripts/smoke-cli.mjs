@@ -5,7 +5,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { windowsPowerShellEnvironment } from "../src/windows.ts";
+import { windowsPowerShellEnvironment, windowsPowerShellExecutable } from "../src/windows.ts";
 
 const [executable, expectedVersion] = process.argv.slice(2);
 if (!executable || !expectedVersion) throw new Error("Usage: smoke-cli.mjs <executable> <version>");
@@ -69,7 +69,7 @@ try {
   assert.equal(health?.model, "smoke-model", `CLI did not become healthy; exit=${child.exitCode}; signal=${child.signalCode}; spawn=${spawnError ?? "none"}; stdout=${childOutput}; stderr=${childError}`);
   assert.equal(typeof health?.instance_id, "string");
   if (process.platform === "win32") {
-    const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", [
+    const result = spawnSync(windowsPowerShellExecutable(), ["-NoProfile", "-NonInteractive", "-Command", [
       "$ErrorActionPreference='Stop'",
       "$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User",
       "$acl=Get-Acl -LiteralPath $env:OCGW_TEST_DIRECTORY",
